@@ -1,10 +1,16 @@
 using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.EP.WebGpu;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace FlorenceTwoLab.Core;
 
 internal sealed class ModelRunner : IDisposable
 {
+    private static readonly string[] _executionProviders = ["CUDA", "WebGPU", "ROCm", "DirectML"];
+    private static readonly object _webGpuLock = new object();
+    private static volatile bool _webGpuRegistered = false;
+    private static readonly Dictionary<string, string> _emptyProviderOptions = [];
+
     private readonly string _visionEncoderModelName = "florence2VisionEncoder.onnx";
     private readonly string _embedTokensModelName = "florence2EmbedTokens.onnx";
     private readonly string _encoderModelName = "florence2Encoder.onnx";
@@ -12,24 +18,85 @@ internal sealed class ModelRunner : IDisposable
 
     private readonly string _modelDirectory;
 
-    private readonly InferenceSession _visionEncoder;
-    private readonly InferenceSession _embedTokens;
-    private readonly InferenceSession _encoder;
-    private readonly InferenceSession _decoder;
+    private InferenceSession _visionEncoder = null!;
+    private InferenceSession _embedTokens = null!;
+    private InferenceSession _encoder = null!;
+    private InferenceSession _decoder = null!;
 
-    private readonly SessionOptions _sessionOptions;
+    private SessionOptions? _sessionOptions;
     private bool _useGPU = true;
 
     public ModelRunner(IOnnxModelPathProvider pathProvider)
     {
         _modelDirectory = pathProvider.OnnxModelDirectory;
-        _sessionOptions = CreateSessionOptions(_useGPU);
 
-        // Initialize sessions with model path
-        _visionEncoder = new InferenceSession(Path.Combine(_modelDirectory, _visionEncoderModelName), _sessionOptions);
-        _embedTokens = new InferenceSession(Path.Combine(_modelDirectory, _embedTokensModelName), _sessionOptions);
-        _encoder = new InferenceSession(Path.Combine(_modelDirectory, _encoderModelName), _sessionOptions);
-        _decoder = new InferenceSession(Path.Combine(_modelDirectory, _decoderModelName), _sessionOptions);
+        string visionEncoderPath = Path.Combine(_modelDirectory, _visionEncoderModelName);
+        string embedTokensPath = Path.Combine(_modelDirectory, _embedTokensModelName);
+        string encoderPath = Path.Combine(_modelDirectory, _encoderModelName);
+        string decoderPath = Path.Combine(_modelDirectory, _decoderModelName);
+
+        bool initialized = false;
+
+        if (_useGPU)
+        {
+            foreach (string provider in _executionProviders)
+            {
+                SessionOptions sessionOptions = CreateSessionOptions();
+                if (TryAppendProvider(sessionOptions, provider))
+                {
+                    try
+                    {
+                        sessionOptions.ApplyConfiguration();
+                        _visionEncoder = new InferenceSession(visionEncoderPath, sessionOptions);
+                        _embedTokens = new InferenceSession(embedTokensPath, sessionOptions);
+                        _encoder = new InferenceSession(encoderPath, sessionOptions);
+                        _decoder = new InferenceSession(decoderPath, sessionOptions);
+                        _sessionOptions = sessionOptions;
+                        initialized = true;
+                        break;
+                    }
+                    catch (Exception)
+                    {
+                        _visionEncoder?.Dispose();
+                        _embedTokens?.Dispose();
+                        _encoder?.Dispose();
+                        _decoder?.Dispose();
+                        _visionEncoder = null!;
+                        _embedTokens = null!;
+                        _encoder = null!;
+                        _decoder = null!;
+                        sessionOptions.Dispose();
+                    }
+                }
+                else
+                {
+                    sessionOptions.Dispose();
+                }
+            }
+        }
+
+        if (!initialized)
+        {
+            SessionOptions cpuOptions = CreateSessionOptions();
+            try
+            {
+                cpuOptions.ApplyConfiguration();
+                _visionEncoder = new InferenceSession(visionEncoderPath, cpuOptions);
+                _embedTokens = new InferenceSession(embedTokensPath, cpuOptions);
+                _encoder = new InferenceSession(encoderPath, cpuOptions);
+                _decoder = new InferenceSession(decoderPath, cpuOptions);
+                _sessionOptions = cpuOptions;
+            }
+            catch
+            {
+                _visionEncoder?.Dispose();
+                _embedTokens?.Dispose();
+                _encoder?.Dispose();
+                _decoder?.Dispose();
+                cpuOptions.Dispose();
+                throw;
+            }
+        }
     }
 
     /// <summary>
@@ -272,45 +339,111 @@ internal sealed class ModelRunner : IDisposable
     }
 
     /// <summary>
-    /// Creates ONNX session options with CPU or GPU execution providers.
+    /// Creates ONNX session options with default performance settings.
     /// </summary>
-    /// <param name="useGPU">True to attempt using GPU execution providers.</param>
     /// <returns>A configured <see cref="SessionOptions"/> instance.</returns>
-    private SessionOptions CreateSessionOptions(bool useGPU)
+    private static SessionOptions CreateSessionOptions()
     {
-        int[] gpuIdsToTry = { 0, 1 };
-
         SessionOptions sessionOptions = new SessionOptions();
         sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
         sessionOptions.IntraOpNumThreads = 1;
         sessionOptions.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
         sessionOptions.EnableMemoryPattern = false;
         sessionOptions.EnableCpuMemArena = true;
-
-        if (_useGPU)
-        {
-            try
-            {
-                sessionOptions.AppendExecutionProvider_DML(0);
-            }
-            catch (Exception) { /* DML Failed */ }
-
-            try
-            {
-                sessionOptions.AppendExecutionProvider_CUDA(0);
-            }
-            catch (Exception) { /* CUDA Failed */ }
-
-            try
-            {
-                sessionOptions.AppendExecutionProvider_ROCm(0);
-            }
-            catch (Exception) { /* ROCm Failed */ }
-        }
-
-        sessionOptions.ApplyConfiguration();
-
         return sessionOptions;
+    }
+
+    private static bool TryAppendProvider(SessionOptions options, string provider)
+    {
+        try
+        {
+            switch (provider)
+            {
+                case "CUDA":
+                    options.AppendExecutionProvider_CUDA(0);
+                    break;
+                case "WebGPU":
+                    return TryAppendWebGpu(options);
+                case "ROCm":
+                    options.AppendExecutionProvider_ROCm(0);
+                    break;
+                case "DirectML":
+                    options.AppendExecutionProvider_DML(0);
+                    break;
+            }
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryAppendWebGpu(SessionOptions options)
+    {
+        try
+        {
+            OrtEnv env = OrtEnv.Instance();
+            string epName = WebGpuEp.GetEpName();
+
+            if (!_webGpuRegistered)
+            {
+                lock (_webGpuLock)
+                {
+                    if (!_webGpuRegistered)
+                    {
+                        string libPath = WebGpuEp.GetLibraryPath();
+                        if (!string.IsNullOrEmpty(libPath) && File.Exists(libPath))
+                        {
+                            var existingDevices = env.GetEpDevices();
+                            bool alreadyRegistered = false;
+                            for (int i = 0; i < existingDevices.Count; i++)
+                            {
+                                if (string.Equals(existingDevices[i].EpName, epName, StringComparison.Ordinal))
+                                {
+                                    alreadyRegistered = true;
+                                    break;
+                                }
+                            }
+
+                            if (!alreadyRegistered)
+                            {
+                                env.RegisterExecutionProviderLibrary("webgpu_ep", libPath);
+                            }
+                            _webGpuRegistered = true;
+                        }
+                    }
+                }
+            }
+
+            if (!_webGpuRegistered)
+            {
+                return false;
+            }
+
+            var devices = env.GetEpDevices();
+            OrtEpDevice? webGpuDevice = null;
+            for (int i = 0; i < devices.Count; i++)
+            {
+                if (string.Equals(devices[i].EpName, epName, StringComparison.Ordinal))
+                {
+                    webGpuDevice = devices[i];
+                    break;
+                }
+            }
+
+            if (webGpuDevice is null)
+            {
+                return false;
+            }
+
+            options.AppendExecutionProvider(env, [webGpuDevice], _emptyProviderOptions);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>

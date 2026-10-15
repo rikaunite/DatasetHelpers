@@ -1,6 +1,7 @@
-﻿using Enums;
+using Enums;
 
 using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.EP.WebGpu;
 
 namespace SmartData.Lib.Services.Base
 {
@@ -10,12 +11,17 @@ namespace SmartData.Lib.Services.Base
     {
         protected InferenceSession _session;
 
-        private readonly List<OnnxRuntimeProvider> _executionProviders = new List<OnnxRuntimeProvider>()
-        {
+        private static readonly OnnxRuntimeProvider[] _executionProviders =
+        [
             OnnxRuntimeProvider.CUDA,
+            OnnxRuntimeProvider.WebGPU,
             OnnxRuntimeProvider.ROCm,
             OnnxRuntimeProvider.DirectML
-        };
+        ];
+
+        private static readonly object _webGpuLock = new object();
+        private static volatile bool _webGpuRegistered = false;
+        private static readonly Dictionary<string, string> _emptyProviderOptions = [];
 
         private readonly SemaphoreSlim _loadModelSemaphore = new SemaphoreSlim(1, 1);
 
@@ -57,7 +63,7 @@ namespace SmartData.Lib.Services.Base
         /// </summary>
         protected virtual async Task LoadModelAsync()
         {
-            await _loadModelSemaphore.WaitAsync();
+            await _loadModelSemaphore.WaitAsync().ConfigureAwait(false);
             try
             {
                 if (IsModelLoaded)
@@ -67,24 +73,45 @@ namespace SmartData.Lib.Services.Base
 
                 ResetState();
 
-                SessionOptions sessionOptions = new SessionOptions()
-                {
-                    GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-                    IntraOpNumThreads = 1,
-                    ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-                    EnableMemoryPattern = false
-                };
-
+                bool sessionCreated = false;
                 foreach (OnnxRuntimeProvider provider in _executionProviders)
                 {
+                    SessionOptions sessionOptions = CreateSessionOptions();
                     if (TryAppendProvider(sessionOptions, provider))
                     {
-                        break;
+                        try
+                        {
+                            sessionOptions.ApplyConfiguration();
+                            _session = await Task.Run(() => new InferenceSession(ModelPath, sessionOptions)).ConfigureAwait(false);
+                            sessionCreated = true;
+                            break;
+                        }
+                        catch (Exception)
+                        {
+                            sessionOptions.Dispose();
+                        }
+                    }
+                    else
+                    {
+                        sessionOptions.Dispose();
                     }
                 }
 
-                sessionOptions.ApplyConfiguration();
-                _session = await Task.Run(() => new InferenceSession(ModelPath, sessionOptions));
+                if (!sessionCreated)
+                {
+                    SessionOptions cpuOptions = CreateSessionOptions();
+                    try
+                    {
+                        cpuOptions.ApplyConfiguration();
+                        _session = await Task.Run(() => new InferenceSession(ModelPath, cpuOptions)).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        cpuOptions.Dispose();
+                        throw;
+                    }
+                }
+
                 IsModelLoaded = true;
             }
             catch (Exception exception)
@@ -97,6 +124,17 @@ namespace SmartData.Lib.Services.Base
             {
                 _loadModelSemaphore.Release();
             }
+        }
+
+        private static SessionOptions CreateSessionOptions()
+        {
+            return new SessionOptions()
+            {
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                IntraOpNumThreads = 1,
+                ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+                EnableMemoryPattern = false
+            };
         }
 
         /// <summary>
@@ -114,6 +152,8 @@ namespace SmartData.Lib.Services.Base
                     case OnnxRuntimeProvider.CUDA:
                         options.AppendExecutionProvider_CUDA();
                         break;
+                    case OnnxRuntimeProvider.WebGPU:
+                        return TryAppendWebGpu(options);
                     case OnnxRuntimeProvider.ROCm:
                         options.AppendExecutionProvider_ROCm();
                         break;
@@ -126,6 +166,73 @@ namespace SmartData.Lib.Services.Base
             catch (Exception)
             {
                 // The specified provider is not available.
+                return false;
+            }
+        }
+
+        private static bool TryAppendWebGpu(SessionOptions options)
+        {
+            try
+            {
+                OrtEnv env = OrtEnv.Instance();
+                string epName = WebGpuEp.GetEpName();
+
+                if (!_webGpuRegistered)
+                {
+                    lock (_webGpuLock)
+                    {
+                        if (!_webGpuRegistered)
+                        {
+                            string libPath = WebGpuEp.GetLibraryPath();
+                            if (!string.IsNullOrEmpty(libPath) && File.Exists(libPath))
+                            {
+                                var existingDevices = env.GetEpDevices();
+                                bool alreadyRegistered = false;
+                                for (int i = 0; i < existingDevices.Count; i++)
+                                {
+                                    if (string.Equals(existingDevices[i].EpName, epName, StringComparison.Ordinal))
+                                    {
+                                        alreadyRegistered = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!alreadyRegistered)
+                                {
+                                    env.RegisterExecutionProviderLibrary("webgpu_ep", libPath);
+                                }
+                                _webGpuRegistered = true;
+                            }
+                        }
+                    }
+                }
+
+                if (!_webGpuRegistered)
+                {
+                    return false;
+                }
+
+                var devices = env.GetEpDevices();
+                OrtEpDevice? webGpuDevice = null;
+                for (int i = 0; i < devices.Count; i++)
+                {
+                    if (string.Equals(devices[i].EpName, epName, StringComparison.Ordinal))
+                    {
+                        webGpuDevice = devices[i];
+                        break;
+                    }
+                }
+
+                if (webGpuDevice is null)
+                {
+                    return false;
+                }
+
+                options.AppendExecutionProvider(env, [webGpuDevice], _emptyProviderOptions);
+                return true;
+            }
+            catch (Exception)
+            {
                 return false;
             }
         }
