@@ -1,4 +1,4 @@
-﻿// Ignore Spelling: Metadata Lanczos
+// Ignore Spelling: Metadata Lanczos
 using HeyRed.ImageSharp.Heif.Formats.Avif;
 using HeyRed.ImageSharp.Heif.Formats.Heif;
 
@@ -300,7 +300,7 @@ namespace SmartData.Lib.Services
                     Position = AnchorPositionMode.Center,
                     Sampler = _lanczosResampler,
                     Compand = true,
-                    PadColor = new Bgr24(255, 255, 255),
+                    PadColor = Color.White,
                     Size = new Size(448, 448),
                 };
 
@@ -348,7 +348,7 @@ namespace SmartData.Lib.Services
                     Position = AnchorPositionMode.Center,
                     Sampler = _lanczosResampler,
                     Compand = true,
-                    PadColor = new Bgr24(255, 255, 255),
+                    PadColor = Color.White,
                     Size = new Size(448, 448),
                 };
 
@@ -399,7 +399,7 @@ namespace SmartData.Lib.Services
                     Position = AnchorPositionMode.Center,
                     Sampler = _bicubicResampler,
                     Compand = true,
-                    PadColor = new Rgb24(255, 255, 255),
+                    PadColor = Color.White,
                     Size = new Size(448, 448),
                 };
 
@@ -447,7 +447,7 @@ namespace SmartData.Lib.Services
                     Position = AnchorPositionMode.Center,
                     Sampler = _lanczosResampler,
                     Compand = true,
-                    PadColor = new Rgb24(0, 0, 0),
+                    PadColor = Color.Black,
                     Size = new Size(416, 416),
                 };
 
@@ -505,7 +505,7 @@ namespace SmartData.Lib.Services
                     Position = AnchorPositionMode.Center,
                     Sampler = _lanczosResampler,
                     Compand = true,
-                    PadColor = new Rgb24(0, 0, 0),
+                    PadColor = Color.Black,
                     Size = new Size(width, height),
                 };
 
@@ -554,7 +554,7 @@ namespace SmartData.Lib.Services
                 Position = AnchorPositionMode.Center,
                 Sampler = _cubicResampler,
                 Compand = true,
-                PadColor = new Rgb24(0, 0, 0),
+                PadColor = Color.Black,
                 Size = new Size(512, 512),
             };
 
@@ -748,7 +748,7 @@ namespace SmartData.Lib.Services
                     Position = AnchorPositionMode.Center,
                     Sampler = _lanczosResampler,
                     Compand = true,
-                    PadColor = new Rgb24(0, 0, 0),
+                    PadColor = Color.Black,
                     Size = new Size(sam2ImageInputSize, sam2ImageInputSize)
                 };
 
@@ -1215,7 +1215,7 @@ namespace SmartData.Lib.Services
             if (hardness >= 0.99f)
             {
                 SolidBrush solidBrush = new SolidBrush(color);
-                maskImage.Mutate(context => context.Fill(solidBrush, circle));
+                maskImage.Mutate(context => context.Paint(canvas => canvas.Fill(solidBrush, circle)));
             }
             else
             {
@@ -1227,7 +1227,7 @@ namespace SmartData.Lib.Services
                     new ColorStop(1f, color.WithAlpha(0))
                 };
                 GradientBrush solidBrush = new RadialGradientBrush(center, radius, GradientRepetitionMode.None, colorStop);
-                maskImage.Mutate(context => context.Fill(solidBrush, circle));
+                maskImage.Mutate(context => context.Paint(canvas => canvas.Fill(solidBrush, circle)));
             }
         }
 
