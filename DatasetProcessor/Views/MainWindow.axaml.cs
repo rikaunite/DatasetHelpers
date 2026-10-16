@@ -1,7 +1,8 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 
 using DatasetProcessor.ViewModels;
+using DatasetProcessor.src.Helpers;
 
 using System;
 
@@ -14,6 +15,8 @@ namespace DatasetProcessor.Views
         public MainWindow()
         {
             InitializeComponent();
+
+            Title = AppVersionHelper.Title;
 
             this.PropertyChanged += OnWindowPropertyChanged;
             this.Activated += OnWindowActivated;

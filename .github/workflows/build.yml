@@ -36,6 +36,17 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Determine build version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG_VER="${{ github.ref_name }}"
+            echo "arg=/p:Version=${TAG_VER#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "arg=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish ${{ matrix.rid }}
         run: >
           dotnet publish DatasetProcessorDesktop/DatasetProcessorDesktop.csproj
@@ -43,6 +54,7 @@ jobs:
           -r ${{ matrix.rid }}
           --self-contained false
           -o ./publish/${{ matrix.rid }}
+          ${{ steps.ver.outputs.arg }}
 
       - name: Set Linux executable permissions
         if: runner.os == 'Linux'

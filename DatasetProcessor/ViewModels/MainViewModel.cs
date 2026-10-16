@@ -1,4 +1,4 @@
-﻿using Avalonia.Controls;
+using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DatasetProcessor.src.Enums;
+using DatasetProcessor.src.Helpers;
 using DatasetProcessor.Views;
 
 using Interfaces;
@@ -39,6 +40,11 @@ public partial class MainViewModel : BaseViewModel
 
     [ObservableProperty]
     private string _pageName;
+
+    [ObservableProperty]
+    private string _windowTitle = AppVersionHelper.Title;
+
+    public string AppVersion => AppVersionHelper.Version;
 
     public string LatestLogMessage
     {
