@@ -34,19 +34,19 @@ Remember to download the model files: https://github.com/Particle1904/DatasetHel
 Use these commands to build it as a self-contained application:
 In Visual Studio Community 2022; Right-click the DatasetProcessorDesktop and click "Open in Terminal" then use the command:
 
-FOR WINDOWS x64: ```dotnet build /restore /t:build /p:TargetFramework=net8.0 /p:Configuration=Release /p:Platform=x64 /p:PublishSingleFile=true /p:PublishTrimmed=false /p:RuntimeIdentifier=win-x64```
+FOR WINDOWS x64: ```dotnet build /restore /t:build /p:TargetFramework=net10.0 /p:Configuration=Release /p:Platform=x64 /p:PublishSingleFile=true /p:PublishTrimmed=false /p:RuntimeIdentifier=win-x64```
 
-FOR WINDOWS x86 (GPU): ```dotnet build /restore /t:build /p:TargetFramework=net8.0 /p:Configuration=Release /p:Platform=x86 /p:PublishSingleFile=true /p:PublishTrimmed=false /p:RuntimeIdentifier=win-x86```
+FOR WINDOWS x86 (GPU): ```dotnet build /restore /t:build /p:TargetFramework=net10.0 /p:Configuration=Release /p:Platform=x86 /p:PublishSingleFile=true /p:PublishTrimmed=false /p:RuntimeIdentifier=win-x86```
 
 FOR LINUX:
-```dotnet build /restore /t:build /p:TargetFramework=net8.0 /p:Configuration=Release /p:Platform=x64 /p:PublishSingleFile=true /p:PublishTrimmed=false /p:RuntimeIdentifier=linux-x64```
+```dotnet build /restore /t:build /p:TargetFramework=net10.0 /p:Configuration=Release /p:Platform=x64 /p:PublishSingleFile=true /p:PublishTrimmed=false /p:RuntimeIdentifier=linux-x64```
 
 FOR MAC:
 [Follow the instructions from this issue](https://github.com/Particle1904/DatasetHelpers/issues/6)
 
 ## Requirements
 This software requires two runtimes:
-- [.NET Desktop Runtime 8 or newer](https://dotnet.microsoft.com/pt-br/download/dotnet/8.0)
+- [.NET Desktop Runtime 10 or newer](https://dotnet.microsoft.com/download/dotnet/10.0)
 - [Visual C++ Redistributable for Visual Studio 2019 for running the Model](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
 
 ### Linux specific requirements: ###
